@@ -1,4 +1,5 @@
 #include <array>
+#include <unordered_set>
 #include <vector>
 #include <string>
 #include <map>
@@ -44,14 +45,14 @@ public:
 };
 
 decltype(gem_vec_in::gem_type_of_char) gem_vec_in::gem_type_of_char = {
-    { 'W', diamond  },
+    { 'W', diamond  }, // White
     { 'D', diamond  },
-    { 'U', sapphire },
+    { 'U', sapphire }, // blUe
     { 'S', sapphire },
-    { 'G', emerald  },
+    { 'G', emerald  }, // Green
     { 'E', emerald  },
-    { 'R', ruby     },
-    { 'K', onyx     },
+    { 'R', ruby     }, // Red
+    { 'K', onyx     }, // blacK
     { 'O', onyx     }
 };
 
@@ -76,10 +77,17 @@ struct game_common_area {
     unsigned short num_turns;
 };
 
-struct game_player_area {
-    unsigned short points;
+class player_gems {
+public:
     gem_vec bonuses;
     gem_vec resources;
+    std::string hash;
+    player_gems(decltype(bonuses) b, decltype(resources) r, decltype(hash) h)
+        : bonuses(b), resources(r), hash(h) {}
+};
+struct game_player_area {
+    unsigned short points;
+    player_gems gems;
 };
 
 struct game {
@@ -144,8 +152,9 @@ struct game {
     // player area
     {
         0, //points
-        { 1,1,1,1,1 },// bonuses
-        { 0,0,0,0,0 } // resources
+        {{ 1,1,1,1,1 },// bonuses
+         { 0,0,0,0,0 },// resources
+         "1010101010"} // hash
     }
 };
 
@@ -154,7 +163,7 @@ struct action {
         purchase,
         draw_gems
     }type;
-    std::pair<unsigned short, unsigned short> purchased_card;
+    std::pair<unsigned short, unsigned short> purchased_card; // location (row,col)
     gem_vec drawn_gems;
 };
 
@@ -168,7 +177,7 @@ bool can_buy(decltype(g.player) const& p, dev_card const& c)
         return false;
     for (auto i = 0; i < 5; ++i) /// ugly, but wtf, std array size is not static?..
     {
-        if (p.bonuses[i] + p.resources[i] < c.cost[i])
+        if (p.gems.bonuses[i] + p.gems.resources[i] < c.cost[i])
             return false;
     }
     return true;
@@ -177,6 +186,7 @@ bool can_buy(decltype(g.player) const& p, dev_card const& c)
 std::vector<std::pair<dev_card,std::pair<unsigned short, unsigned short>>>
     all_buyable_dev_cards(decltype(decltype(game::common)::dev_cards) const& tableau, decltype(game::player) const& player)
 {
+    /// include prioritization of 
     std::vector<std::pair<dev_card, std::pair<unsigned short, unsigned short>>> ret{};
 
     for (unsigned short r = 0; r < 3; ++r) {
@@ -232,8 +242,9 @@ std::vector<gx_pair> game_states_from_possible_actions(gx_pair const& gx)
         // remove from supply & add to player resources
         for (auto i = 0; i < 5; ++i) /// ugly, but wtf, std array size is not static?..
         {
-            newgx.first.common.tokens   [i] -= x[i];
-            newgx.first.player.resources[i] += x[i];
+            newgx.first.common.tokens[i] -= x[i];
+            newgx.first.player.gems.resources[i] += x[i];
+            newgx.first.player.gems.hash[2*i + 1] = newgx.first.player.gems.resources[i] + '0';
         }
 
         newgx.second.push_back({ action::draw_gems, {}, x });
@@ -258,14 +269,16 @@ std::vector<gx_pair> game_states_from_possible_actions(gx_pair const& gx)
         auto newgx{ gx };
         ++newgx.first.common.num_turns;
         // spend
-        for (auto i = 0; i < 5; ++i) /// ugly, but wtf, std array size is not static?..
+        for (auto i = 0; i < 5; ++i)
         {
-            newgx.first.player.resources[i] -=
-                (newgx.first.player.bonuses[i] < card.cost[i] ?
-                    (card.cost[i] - newgx.first.player.bonuses[i]) : 0);
+            newgx.first.player.gems.resources[i] -=
+                (newgx.first.player.gems.bonuses[i] < card.cost[i] ?
+                    (card.cost[i] - newgx.first.player.gems.bonuses[i]) : 0);
+            newgx.first.player.gems.hash[2*i+1] = newgx.first.player.gems.resources[i] + '0';
         }
         // gain card & replace if possible
-        ++newgx.first.player.bonuses[card.bonus]; // update bonus
+        ++newgx.first.player.gems.bonuses[card.bonus]; // update bonus
+        ++newgx.first.player.gems.hash[card.bonus * 2];
         newgx.first.player.points += card.prestige_pts;
         if (card.does_not_replace) {
             newgx.first.common.dev_cards[r][c] = nocard;
@@ -307,16 +320,17 @@ std::ostream& operator<<(std::ostream& os, gem_vec const& v)
 
 DFS_return DFS(game gg)
 {
-    // std::hash<game> h(gg); 
-    // hash would help a lot to determine already visited game states 
-    // but hash would be hard to determine currently given the dev_deck vector
+    static std::vector<std::unordered_set<std::string>> visited(18-1+5+1); // game states encountered by points
+    // size is goalpoints-1, + max_points in a single turn, and + 1 to allow for direct indexing and including 0
+
     std::stack<gx_pair> S;
     S.push({ gg,{} });
 
     while (!S.empty()) {
         auto game_action_pair = S.top();
 
-        if (game_action_pair.first.common.num_turns <= 14)
+        // output
+        if (game_action_pair.first.common.num_turns <= 12)
         {
             if (!game_action_pair.second.empty())
             {
@@ -337,6 +351,7 @@ DFS_return DFS(game gg)
             }
             //std::cin.get();
         }
+
         S.pop();
 
         for (auto& x : game_states_from_possible_actions(game_action_pair))
@@ -345,9 +360,23 @@ DFS_return DFS(game gg)
                 return GOT_IT;
             else
             {
-                if (x.first.common.num_turns <= 18)
+                auto h = x.first.player.gems.hash;
+                if (visited[x.first.player.points].count(h))
+                    continue;
+                visited[x.first.player.points].insert(h);
+
+                if (x.first.common.num_turns < 15)
+                {
                     S.push(x);
-                ;
+                }
+                else if (x.first.common.num_turns < 18 && (x.first.player.points >= (x.first.common.num_turns - 15) * 5 + 3))
+                    // not on track for enough points
+                    // 5 is the highest points that can be attained on a single turn (based on max point of purchasable card)
+                    // by turn 17, need to have 13 points (minimum)
+                    // by turn 16, need 8 points; by turn 15, at least 3 points
+                    /// ** this would differ if there are nobles in the game, and ultimately is better defined by what cards & nobles remain
+                    /// this so far is a weak upper bound of max points per turn
+                    S.push(x);
             }
         }
     }
