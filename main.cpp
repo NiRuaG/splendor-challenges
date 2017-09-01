@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <iostream>
 
+#include "splendor-challenges\ChallengeData.h"
+
 enum gem_types {
     diamond,
     sapphire,
@@ -65,8 +67,23 @@ struct dev_card {
     bool does_not_replace = false;
 };
 const dev_card nocard;
-using dev_tableau_row = std::array<dev_card, 4>;
-using dev_tableau = std::array<dev_tableau_row, 3>;
+
+    
+class dev_tableau : private std::array<std::array<dev_card,4>, 3>
+{
+public:
+    using row_type = dev_tableau::value_type;
+private:
+    using T_base = std::array<row_type, 3>;
+
+public:
+    using T_base::operator[];
+    dev_tableau(T_base&& b)
+        : T_base{ b }
+    {}
+};
+
+
 
 using dev_decks = std::array< std::vector<dev_card>, 3>;
 
@@ -77,13 +94,10 @@ struct game_common_area {
     unsigned short num_turns;
 };
 
-class player_gems {
-public:
+struct player_gems {
     gem_vec bonuses;
     gem_vec resources;
     std::string hash;
-    player_gems(decltype(bonuses) b, decltype(resources) r, decltype(hash) h)
-        : bonuses(b), resources(r), hash(h) {}
 };
 struct game_player_area {
     unsigned short points;
@@ -93,69 +107,6 @@ struct game_player_area {
 struct game {
     game_common_area common;
     game_player_area player;
-} g = {
-    // common area
-    {
-        //token_supply
-        { 2,2,2,2,2 },
-
-        // dev_cards
-        {{ // bottom row
-            {{ { 0,"2RWKG",sapphire,true  },
-               { 0,"GWKU" ,ruby           },
-               { 0,"RUK2G",diamond        },
-               { 0,"2R2KU",emerald        } }},
-            // middle row
-            {{ { 2,"5R3K"  ,diamond       },
-               { 1,"2G3R3W",emerald       },
-               { 2,"5R"    ,diamond       },
-               { 1,"3G3K2U",sapphire      } }},
-            // top row
-            {{ { 5,"7U3G"  ,emerald       },
-               { 4,"6U3G3W",emerald       },
-               { 5,"3W7K"  ,diamond ,true },
-               { 4,"3U3K6W",sapphire,true } }}
-        }},
-
-        // dev_decks REVERSE ORDER!!!
-        {{
-            // bottom row
-            {   { 0,"G2WKU",ruby    ,true },
-                { 0,"W2K"  ,sapphire      },
-                { 0,"2U2K" ,diamond       },
-                { 0,"2RK"  ,diamond       },
-                { 0,"3K"   ,sapphire,true },
-                { 0,"2GR"  ,onyx    ,true },
-                { 0,"G2K2W",ruby          },
-                { 0,"2G2RW",sapphire      },
-                { 0,"2UG"  ,ruby          },
-                { 0,"RWKU" ,emerald       } 
-            },
-            // middle row
-            {   { 2,"5W3U"  ,sapphire,true },
-                { 2,"5G3R"  ,onyx          },
-                { 3,"6K"    ,onyx    ,true },
-                { 2,"4U2GW" ,ruby    ,true },
-                { 1,"2R2K3G",diamond       },
-                { 3,"6W"    ,diamond ,true },
-                { 2,"4G2RU" ,onyx          },
-                { 1,"3U2K2W",emerald       }
-            },
-            // top row
-            { 
-                { 4,"7U"      ,emerald,true },
-                { 3,"3G3W3K5U",ruby         },
-                { 3,"5G3W3R3U",onyx   ,true }
-            }
-        }}
-    },
-    // player area
-    {
-        0, //points
-        {{ 1,1,1,1,1 },// bonuses
-         { 0,0,0,0,0 },// resources
-         "1010101010"} // hash
-    }
 };
 
 struct action {
@@ -167,7 +118,7 @@ struct action {
     gem_vec drawn_gems;
 };
 
-bool can_buy(decltype(g.player) const& p, dev_card const& c)
+bool can_buy(game_player_area const& p, dev_card const& c)
 {
     if (  c.cost[0]
         + c.cost[1]
@@ -186,7 +137,8 @@ bool can_buy(decltype(g.player) const& p, dev_card const& c)
 std::vector<std::pair<dev_card,std::pair<unsigned short, unsigned short>>>
     all_buyable_dev_cards(decltype(decltype(game::common)::dev_cards) const& tableau, decltype(game::player) const& player)
 {
-    /// include prioritization of 
+    /// include prioritization of cards that get replaced 
+    // they are exclusively better than non-replaced, allowing another option
     std::vector<std::pair<dev_card, std::pair<unsigned short, unsigned short>>> ret{};
 
     for (unsigned short r = 0; r < 3; ++r) {
@@ -320,8 +272,8 @@ std::ostream& operator<<(std::ostream& os, gem_vec const& v)
 
 DFS_return DFS(game gg)
 {
-    static std::vector<std::unordered_set<std::string>> visited(18-1+5+1); // game states encountered by points
-    // size is goalpoints-1, + max_points in a single turn, and + 1 to allow for direct indexing and including 0
+    static std::vector<std::unordered_set<std::string>> visited(18+5); // game states encountered by points
+    // size includes point states from [0, goal-1+max points in a single turn]
 
     std::stack<gx_pair> S;
     S.push({ gg,{} });
@@ -374,7 +326,7 @@ DFS_return DFS(game gg)
                     // 5 is the highest points that can be attained on a single turn (based on max point of purchasable card)
                     // by turn 17, need to have 13 points (minimum)
                     // by turn 16, need 8 points; by turn 15, at least 3 points
-                    /// ** this would differ if there are nobles in the game, and ultimately is better defined by what cards & nobles remain
+                    /// ** this would differ if there are Nobles in the game, and ultimately is better defined by what cards & nobles remain
                     /// this so far is a weak upper bound of max points per turn
                     S.push(x);
             }
@@ -383,7 +335,7 @@ DFS_return DFS(game gg)
 }
 
 int main() {
-    DFS(g);
+    DFS(Splendor::Challenges::Jacques_Cartier_1_Disc_of_Newfoundland);
 
     std::cin.get();
     return 0;
